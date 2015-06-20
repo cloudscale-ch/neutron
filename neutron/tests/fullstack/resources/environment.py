@@ -253,12 +253,19 @@ class Host(fixtures.Fixture):
 
         veth_1.link.set_up()
         veth_2.link.set_up()
+        self.tunnel_device = veth_1
 
     def connect_to_central_network_via_vlans(self, host_data_bridge):
         # If using VLANs as a segmentation device, it's needed to connect
         # a provider bridge to a centralized, shared bridge.
-        net_helpers.create_patch_ports(
+        source, destination = net_helpers.create_patch_ports(
             self.central_bridge, host_data_bridge)
+        self.internal_port = destination
+
+    def connect_to_external_network(self, host_external_bridge):
+        source, destination = net_helpers.create_patch_ports(
+            self.central_bridge, host_external_bridge)
+        self.external_port = destination
 
     def allocate_local_ip(self):
         if not self.env_desc.network_range:
@@ -285,6 +292,15 @@ class Host(fixtures.Fixture):
                         prefix_is_full_name=True)).bridge
                 self.network_bridges[network_id] = bridge
         return bridge
+
+    def disconnect(self):
+        if self.env_desc.tunneling:
+            self.tunnel_device.addr.flush(4)
+        else:
+            self.central_bridge.delete_port(self.internal_port)
+        if self.host_desc.l3_agent:
+            self.central_bridge.delete_port(
+                self.external_port)
 
     @property
     def hostname(self):
@@ -374,6 +390,9 @@ class Environment(fixtures.Fixture):
             return len(running_agents) == agents_count
         except nc_exc.NeutronClientException:
             return False
+
+    def get_host_by_name(self, hostname):
+        return next(host for host in self.hosts if host.hostname == hostname)
 
     def _create_host(self, host_desc):
         temp_dir = self.useFixture(fixtures.TempDir()).path

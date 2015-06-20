@@ -261,6 +261,8 @@ def create_patch_ports(source, destination):
     source.add_patch_port(source_name, destination_name)
     destination.add_patch_port(destination_name, source_name)
 
+    return source_name, destination_name
+
 
 def create_vlan_interface(
         namespace, port_name, mac_address, ip_address, vlan_tag):
