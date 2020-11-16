@@ -636,6 +636,12 @@ class Dnsmasq(DhcpLocalProcess):
         epoch-timestamp mac_addr ip_addr hostname client-ID
         """
         filename = self.get_conf_file_name('leases')
+
+        if os.path.isfile(filename):
+            LOG.debug('Skipping initial lease file creation as a lease file '
+                      'already exists.')
+            return filename
+
         buf = six.StringIO()
 
         LOG.debug('Building initial lease file: %s', filename)
