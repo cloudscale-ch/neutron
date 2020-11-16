@@ -1452,6 +1452,15 @@ class TestDnsmasq(TestBase):
         timestamp = 0
         self._test_output_init_lease_file(timestamp)
 
+    @mock.patch('os.path.isfile', return_value=True)
+    def test_output_init_lease_file_existing(self, isfile):
+        with mock.patch.object(dhcp.Dnsmasq, 'get_conf_file_name') as conf_fn:
+            conf_fn.return_value = '/foo/leases'
+            dm = self._get_dnsmasq(FakeDualNetwork())
+            dm._output_init_lease_file()
+        # Assert replace_replace file is not called
+        self.safe.assert_not_called()
+
     def _test_output_opts_file(self, expected, network, ipm_retval=None):
         with mock.patch.object(dhcp.Dnsmasq, 'get_conf_file_name') as conf_fn:
             conf_fn.return_value = '/foo/opts'
