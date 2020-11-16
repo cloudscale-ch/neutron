@@ -1452,6 +1452,47 @@ class TestDnsmasq(TestBase):
         timestamp = 0
         self._test_output_init_lease_file(timestamp)
 
+    @mock.patch('time.time')
+    @mock.patch('os.path.isfile', return_value=True)
+    def test_output_init_lease_file_existing(self, isfile, tmock):
+        ipv4_leases = '\n'.join((
+            '1623162161 00:00:80:aa:bb:cc 192.168.0.2 host-192-168-0-2 *',
+            '1623147425 00:00:0f:aa:bb:cc 192.168.0.3 host-192-168-0-3 ff:b5:5e:67:ff:00:02:00:00:ab:11:43:e5:86:52:f3:d7:2c:97', # noqa
+            '1623138717 00:00:0f:rr:rr:rr 192.168.0.1 host-192-168-0-1 ff:b5:5e:67:ff:00:02:00:00:ab:11:f6:f2:aa:cb:94:c1:b4:86', # noqa
+        ))
+        ipv6_leases = '\n'.join((
+            'duid 00:01:00:01:27:da:58:97:fa:16:3e:6c:ad:c1',
+            '1623083263 755752236 2001:db8::44 host-2001-db8--44 00:01:00:01:28:50:e8:31:5a:42:2d:0b:dd:2c', # noqa
+            '1623133362 3042863103 2001:db8::20 host-2001-db8--20 00:02:00:00:ab:11:f9:cc:99:ad:ce:54:22:69', # noqa
+            '1623143299 3042863103 2001:db8::45 host-2001-db8--45 00:02:00:00:ab:11:fa:c9:0e:0f:3d:90:73:f0', # noqa
+            '1623134168 3042863103 2001:db8::12 host-2001-db8--12 00:02:00:00:ab:11:f6:f2:aa:cb:94:c1:b4:86', # noqa
+
+        ))
+        existing_leases = '\n'.join((ipv4_leases, ipv6_leases))
+
+        # lease duration should be added to current time
+        timestamp = 1000000 + 500
+        expected_ipv4 = [
+            '00:00:80:aa:bb:cc 192.168.0.2 * *',
+            '00:00:0f:aa:bb:cc 192.168.0.3 * *',
+            '00:00:0f:rr:rr:rr 192.168.0.1 * *\n']
+        expected_ipv4 = "\n".join(['%s %s' % (timestamp, le)
+                                   for le in expected_ipv4])
+
+        self.conf.set_override('dhcp_lease_duration', 500)
+        tmock.return_value = 1000000
+
+        with mock.patch.object(dhcp.Dnsmasq, 'get_conf_file_name') as conf_fn:
+            conf_fn.return_value = '/foo/leases'
+            dm = self._get_dnsmasq(FakeDualNetwork())
+            with mock.patch('builtins.open',
+                            mock.mock_open(read_data=existing_leases)):
+                dm._output_init_lease_file()
+
+        # Assert the lease file contains the existing ipv6_leases
+        self.safe.assert_called_once_with('/foo/leases',
+                                          expected_ipv4 + ipv6_leases)
+
     def _test_output_opts_file(self, expected, network, ipm_retval=None):
         with mock.patch.object(dhcp.Dnsmasq, 'get_conf_file_name') as conf_fn:
             conf_fn.return_value = '/foo/opts'

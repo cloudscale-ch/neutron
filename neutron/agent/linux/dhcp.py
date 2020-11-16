@@ -662,6 +662,26 @@ class Dnsmasq(DhcpLocalProcess):
             # client ID will be overwritten on the next renewal.
             buf.write('%s %s %s * *\n' %
                       (timestamp, port.mac_address, alloc.ip_address))
+
+        if os.path.isfile(filename):
+            # The IPv6 leases can't be generated as their DUID is unknown. To
+            # not loose active leases, read the existing leases and add them to
+            # the generated file.
+            LOG.debug('Reading IPv6 leases from existing leasfile.')
+            with open(filename) as leasefile:
+                for line in leasefile:
+                    if line.startswith('duid '):
+                        buf.write(line)
+                        continue
+                    try:
+                        ts, mac, ip, host, duid = line.split(' ', 5)
+                    except ValueError:
+                        # not the correct format for a lease, skip this line
+                        continue
+
+                    if netaddr.valid_ipv6(ip):
+                        buf.write(line)
+
         contents = buf.getvalue()
         file_utils.replace_file(filename, contents)
         LOG.debug('Done building initial lease file %s with contents:\n%s',
