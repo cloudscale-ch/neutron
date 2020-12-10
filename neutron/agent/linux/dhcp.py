@@ -253,7 +253,7 @@ class DhcpLocalProcess(DhcpBase):
             common_utils.wait_until_true(lambda: not self.active)
         if not retain_port:
             self._destroy_namespace_and_port()
-        self._remove_config_files()
+            self._remove_config_files()
 
     def _destroy_namespace_and_port(self):
         try:
