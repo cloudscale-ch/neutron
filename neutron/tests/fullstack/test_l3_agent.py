@@ -515,10 +515,27 @@ class TestHAL3Agent(TestL3Agent):
 
         # Test external connectivity, failover, test again
         pinger = net_helpers.Pinger(vm.namespace, external.ip, interval=0.1)
+        netcat_tcp = net_helpers.NetcatTester(
+            vm.namespace,
+            external.namespace,
+            external.ip,
+            3333,
+            net_helpers.NetcatTester.TCP,
+        )
+        netcat_udp = net_helpers.NetcatTester(
+            vm.namespace,
+            external.namespace,
+            external.ip,
+            3334,
+            net_helpers.NetcatTester.UDP,
+        )
+
         pinger.start()
 
         # Ensure connectivity before disconnect
         vm.block_until_ping(external.ip)
+        netcat_tcp.establish_connection()
+        netcat_udp.establish_connection()
 
         active_host = self._get_host_for_active_ha_router_replica(router_id)
         active_host.disconnect()
@@ -526,7 +543,13 @@ class TestHAL3Agent(TestL3Agent):
         # Ensure connectivity is shortly lost on failover and recovers
         vm.assert_no_ping(external.ip)
         vm.block_until_ping(external.ip)
+        netcat_tcp.test_connectivity()
+        netcat_udp.test_connectivity()
+
+        # Stop probing processes
         pinger.stop()
+        netcat_tcp.stop_processes()
+        netcat_udp.stop_processes()
 
         # With the default advert_int of 2s the keepalived master timeout is
         # about 6s. Assert less than 80 lost packets (8 seconds)
@@ -542,7 +565,8 @@ class TestHAL3Agent(TestL3Agent):
     def _get_state_file_for_primary_agent(self, router_id):
         for host in self.environment.hosts:
             keepalived_state_file = os.path.join(
-                host.neutron_config.state_path, "ha_confs", router_id, "state")
+                host.neutron_config.config.DEFAULT.state_path,
+                "ha_confs", router_id, "state")
 
             if self._get_keepalived_state(keepalived_state_file) == "primary":
                 return keepalived_state_file
