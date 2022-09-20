@@ -82,12 +82,18 @@ class KeepalivedGetFreeRangeTestCase(KeepalivedBaseTestCase):
 
 class KeepalivedConfBaseMixin(object):
 
+    def _get_conntrackd_manager(self):
+        conntrackd_manager = mock.Mock()
+        conntrackd_manager.get_ha_script_path.return_value = '/tmp/ha.sh'
+        return conntrackd_manager
+
     def _get_config(self):
         config = keepalived.KeepalivedConf()
+        conntrackd_manager = self._get_conntrackd_manager()
 
-        instance1 = keepalived.KeepalivedInstance('MASTER', 'eth0', 1,
-                                                  ['169.254.192.0/18'],
-                                                  advert_int=5)
+        instance1 = keepalived.KeepalivedInstance(
+            'MASTER', 'eth0', 1, ['169.254.192.0/18'],
+            conntrackd_manager=conntrackd_manager, advert_int=5)
         instance1.set_authentication('AH', 'pass123')
         instance1.track_interfaces.append("eth0")
 
@@ -113,9 +119,9 @@ class KeepalivedConfBaseMixin(object):
                                                           "eth1")
         instance1.virtual_routes.gateway_routes = [virtual_route]
 
-        instance2 = keepalived.KeepalivedInstance('MASTER', 'eth4', 2,
-                                                  ['169.254.192.0/18'],
-                                                  mcast_src_ip='224.0.0.1')
+        instance2 = keepalived.KeepalivedInstance(
+            'MASTER', 'eth4', 2, ['169.254.192.0/18'],
+            conntrackd_manager=conntrackd_manager, mcast_src_ip='224.0.0.1')
         instance2.track_interfaces.append("eth4")
 
         vip_address1 = keepalived.KeepalivedVipAddress('192.168.3.0/24',
@@ -135,6 +141,14 @@ class KeepalivedConfTestCase(KeepalivedBaseTestCase,
                              KeepalivedConfBaseMixin):
 
     expected = KEEPALIVED_GLOBAL_CONFIG + textwrap.dedent("""
+        vrrp_sync_group VG_VR_1{
+            group  {
+                VR_1
+            }
+            notify_master "/tmp/ha.sh primary"
+            notify_backup "/tmp/ha.sh backup"
+            notify_fault "/tmp/ha.sh fault"
+        }
         vrrp_instance VR_1 {
             state MASTER
             interface eth0
@@ -161,6 +175,14 @@ class KeepalivedConfTestCase(KeepalivedBaseTestCase,
             virtual_routes {
                 0.0.0.0/0 via 192.168.1.1 dev eth1 no_track
             }
+        }
+        vrrp_sync_group VG_VR_2{
+            group  {
+                VR_2
+            }
+            notify_master "/tmp/ha.sh primary"
+            notify_backup "/tmp/ha.sh backup"
+            notify_fault "/tmp/ha.sh fault"
         }
         vrrp_instance VR_2 {
             state MASTER
@@ -203,6 +225,14 @@ class KeepalivedConfTestCase(KeepalivedBaseTestCase,
 class KeepalivedConfWithoutNoTrackTestCase(KeepalivedConfTestCase):
 
     expected = KEEPALIVED_GLOBAL_CONFIG + textwrap.dedent("""
+        vrrp_sync_group VG_VR_1{
+            group  {
+                VR_1
+            }
+            notify_master "/tmp/ha.sh primary"
+            notify_backup "/tmp/ha.sh backup"
+            notify_fault "/tmp/ha.sh fault"
+        }
         vrrp_instance VR_1 {
             state MASTER
             interface eth0
@@ -229,6 +259,14 @@ class KeepalivedConfWithoutNoTrackTestCase(KeepalivedConfTestCase):
             virtual_routes {
                 0.0.0.0/0 via 192.168.1.1 dev eth1
             }
+        }
+        vrrp_sync_group VG_VR_2{
+            group  {
+                VR_2
+            }
+            notify_master "/tmp/ha.sh primary"
+            notify_backup "/tmp/ha.sh backup"
+            notify_fault "/tmp/ha.sh fault"
         }
         vrrp_instance VR_2 {
             state MASTER
@@ -261,11 +299,11 @@ class KeepalivedStateExceptionTestCase(KeepalivedBaseTestCase):
         self.assertRaises(keepalived.InvalidInstanceStateException,
                           keepalived.KeepalivedInstance,
                           invalid_vrrp_state, 'eth0', 33,
-                          ['169.254.192.0/18'])
+                          ['169.254.192.0/18'], None)
 
         invalid_auth_type = 'into a club'
         instance = keepalived.KeepalivedInstance('MASTER', 'eth0', 1,
-                                                 ['169.254.192.0/18'])
+                                                 ['169.254.192.0/18'], None)
         self.assertRaises(keepalived.InvalidAuthenticationTypeException,
                           instance.set_authentication,
                           invalid_auth_type, 'some_password')
@@ -329,8 +367,14 @@ class KeepalivedInstanceTestCase(KeepalivedBaseTestCase,
                                  KeepalivedConfBaseMixin):
     def test_get_primary_vip(self):
         instance = keepalived.KeepalivedInstance('MASTER', 'ha0', 42,
-                                                 ['169.254.192.0/18'])
+                                                 ['169.254.192.0/18'],
+                                                 None)
         self.assertEqual('169.254.0.42/24', instance.get_primary_vip())
+
+    def _get_conntrackd_manager(self):
+        conntrackd_manager = mock.Mock()
+        conntrackd_manager.get_ha_script_path.return_value = '/tmp/ha.sh'
+        return conntrackd_manager
 
     def _test_remove_addresses_by_interface(self, no_track_value):
         config = self._get_config()
@@ -339,6 +383,14 @@ class KeepalivedInstanceTestCase(KeepalivedBaseTestCase,
         instance.remove_vips_vroutes_by_interface('eth10')
 
         expected = KEEPALIVED_GLOBAL_CONFIG + textwrap.dedent("""
+            vrrp_sync_group VG_VR_1{
+                group  {
+                    VR_1
+                }
+                notify_master "/tmp/ha.sh primary"
+                notify_backup "/tmp/ha.sh backup"
+                notify_fault "/tmp/ha.sh fault"
+            }
             vrrp_instance VR_1 {
                 state MASTER
                 interface eth0
@@ -362,6 +414,14 @@ class KeepalivedInstanceTestCase(KeepalivedBaseTestCase,
                 virtual_routes {
                     0.0.0.0/0 via 192.168.1.1 dev eth1%(no_track)s
                 }
+            }
+            vrrp_sync_group VG_VR_2{
+                group  {
+                    VR_2
+                }
+                notify_master "/tmp/ha.sh primary"
+                notify_backup "/tmp/ha.sh backup"
+                notify_fault "/tmp/ha.sh fault"
             }
             vrrp_instance VR_2 {
                 state MASTER
@@ -394,6 +454,14 @@ class KeepalivedInstanceTestCase(KeepalivedBaseTestCase,
 
     def test_build_config_no_vips(self):
         expected = textwrap.dedent("""\
+            vrrp_sync_group VG_VR_1{
+                group  {
+                    VR_1
+                }
+                notify_master "/tmp/ha.sh primary"
+                notify_backup "/tmp/ha.sh backup"
+                notify_fault "/tmp/ha.sh fault"
+            }
             vrrp_instance VR_1 {
                 state MASTER
                 interface eth0
@@ -405,30 +473,43 @@ class KeepalivedInstanceTestCase(KeepalivedBaseTestCase,
                 }
             }""")
         instance = keepalived.KeepalivedInstance(
-            'MASTER', 'eth0', VRRP_ID, ['169.254.192.0/18'])
+            'MASTER', 'eth0', VRRP_ID, ['169.254.192.0/18'],
+            self._get_conntrackd_manager(),
+        )
         self.assertEqual(expected, os.linesep.join(instance.build_config()))
 
     def test_build_config_no_vips_track_script(self):
-        expected = """
-vrrp_script ha_health_check_1 {
-    script "/etc/ha_confs/qrouter-x/ha_check_script_1.sh"
-    interval 5
-    fall 2
-    rise 2
-}
+        expected = textwrap.dedent("""\
 
-vrrp_instance VR_1 {
-    state MASTER
-    interface eth0
-    virtual_router_id 1
-    priority 50
-    garp_master_delay 60
-    virtual_ipaddress {
-        169.254.0.1/24 dev eth0
-    }
-}"""
+            vrrp_script ha_health_check_1 {
+                script "/etc/ha_confs/qrouter-x/ha_check_script_1.sh"
+                interval 5
+                fall 2
+                rise 2
+            }
+
+            vrrp_sync_group VG_VR_1{
+                group  {
+                    VR_1
+                }
+                notify_master "/tmp/ha.sh primary"
+                notify_backup "/tmp/ha.sh backup"
+                notify_fault "/tmp/ha.sh fault"
+            }
+            vrrp_instance VR_1 {
+                state MASTER
+                interface eth0
+                virtual_router_id 1
+                priority 50
+                garp_master_delay 60
+                virtual_ipaddress {
+                    169.254.0.1/24 dev eth0
+                }
+            }""")
         instance = keepalived.KeepalivedInstance(
-            'MASTER', 'eth0', VRRP_ID, ['169.254.192.0/18'])
+            'MASTER', 'eth0', VRRP_ID, ['169.254.192.0/18'],
+            self._get_conntrackd_manager(),
+        )
         instance.track_script = keepalived.KeepalivedTrackScript(
             VRRP_INTERVAL, '/etc/ha_confs/qrouter-x', VRRP_ID)
         self.assertEqual(expected, '\n'.join(instance.build_config()))
@@ -444,7 +525,7 @@ class KeepalivedVipAddressTestCase(KeepalivedBaseTestCase):
 
     def test_add_vip_idempotent(self):
         instance = keepalived.KeepalivedInstance('MASTER', 'eth0', 1,
-                                                 ['169.254.192.0/18'])
+                                                 ['169.254.192.0/18'], None)
         instance.add_vip('192.168.222.1/32', 'eth11', None)
         instance.add_vip('192.168.222.1/32', 'eth12', 'link')
         self.assertEqual(1, len(instance.vips))

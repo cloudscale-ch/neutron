@@ -39,7 +39,7 @@ class KeepalivedManagerTestCase(base.BaseLoggingTestCase,
                                                                'router')
         self.manager = keepalived.KeepalivedManager(
             'router1', self.expected_config, self.process_monitor,
-            conf_path=cfg.CONF.state_path)
+            conntrackd_manager=None, conf_path=cfg.CONF.state_path)
         self.addCleanup(self.manager.disable)
 
     def _spawn_keepalived(self, keepalived_manager):

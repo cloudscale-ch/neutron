@@ -25,6 +25,7 @@ from oslo_log import log as logging
 
 from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_info as router
+from neutron.agent.linux import conntrackd
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
@@ -66,6 +67,7 @@ class HaRouter(router.RouterInfo):
 
         self.ha_port = None
         self.keepalived_manager = None
+        self.conntrackd_manager = None
         self.state_change_callback = state_change_callback
         self._ha_state = None
         self._ha_state_path = None
@@ -143,18 +145,86 @@ class HaRouter(router.RouterInfo):
         super(HaRouter, self).initialize(process_monitor)
 
         self.set_ha_port()
+        self._init_conntrackd_manager(process_monitor)
         self._init_keepalived_manager(process_monitor)
         self._check_and_set_real_state()
         self.ha_network_added()
         self.update_initial_state(self.state_change_callback)
         self.spawn_state_change_monitor(process_monitor)
 
+    def _get_conntrackd_general_config(self):
+        conntrackd_general_config = conntrackd.ConntrackdGeneral(
+            hash_size=self.agent_conf.ha_conntrackd_hashsize,
+            hash_limit=self.agent_conf.ha_conntrackd_hashlimit,
+            syslog='on',
+            lock_file=os.path.join(
+                os.path.abspath(
+                    os.path.normpath(self.agent_conf.ha_confs_path)),
+                self.router['id'],
+                'conntrack.lock'),
+            unix=conntrackd.ConntrackdUnix(
+                path=os.path.join(
+                    os.path.abspath(
+                        os.path.normpath(self.agent_conf.ha_confs_path)),
+                    self.router['id'],
+                    'conntrackd.ctl'),
+                backlog=self.agent_conf.ha_conntrackd_unix_backlog),
+            socket_buffer_size=self.agent_conf.ha_conntrackd_socketbuffersize,
+            socket_buffer_size_max_grown=(
+                self.agent_conf.ha_conntrackd_socketbuffersize_max_grown),
+            filter=conntrackd.ConntrackdFilter(
+                protocol_accept='TCP',
+                address_ignore='IPv4_address 127.0.0.1'))
+
+        return conntrackd_general_config
+
+    def _get_ha_port_fixed_ip_with_subnet(self, subnet):
+        for fixed_ip in self.ha_port.get('fixed_ips', []):
+            if fixed_ip['subnet_id'] == subnet['id']:
+                return fixed_ip['ip_address']
+        return None
+
+    def _get_conntrackd_ipv4_interface(self):
+        return self.ha_port['fixed_ips'][0]['ip_address']
+
+    def _get_conntrackd_sync_config(self):
+        interface_name = self.get_ha_device_name()
+        conntrackd_sync_config = conntrackd.ConntrackdSync(
+            mode=conntrackd.ConntrackdMode(mode='FTFW'),
+            transport=conntrackd.ConntrackdTransport(
+                transport='Multicast',
+                default='Default',
+                ipv4_address=self.agent_conf.ha_conntrackd_ipv4_address,
+                ipv4_interface=self._get_conntrackd_ipv4_interface(),
+                # This is actually the multicast port number. Each router on
+                # the same HA network has to use another port.
+                group=self.agent_conf.ha_conntrackd_group + self.ha_vr_id,
+                interface=interface_name,
+                snd_socket_buffer=(
+                    self.agent_conf.ha_conntrackd_sndsocketbuffer),
+                rcv_socket_buffer=(
+                    self.agent_conf.ha_conntrackd_rcvsocketbuffer),
+                checksum='on'))
+
+        return conntrackd_sync_config
+
+    def _init_conntrackd_manager(self, process_monitor):
+        self.conntrackd_manager = conntrackd.ConntrackdManager(
+            self.router['id'],
+            conntrackd.ConntrackdConfig(
+                general_config=self._get_conntrackd_general_config(),
+                sync_config=self._get_conntrackd_sync_config()),
+            process_monitor,
+            conf_path=self.agent_conf.ha_confs_path,
+            namespace=self.ns_name)
+
     def _init_keepalived_manager(self, process_monitor):
         self.keepalived_manager = keepalived.KeepalivedManager(
             self.router['id'],
             keepalived.KeepalivedConf(),
             process_monitor,
-            conf_path=self.agent_conf.ha_confs_path,
+            self.agent_conf.ha_confs_path,
+            self.conntrackd_manager,
             namespace=self.ha_namespace,
             throttle_restart_value=(
                 self.agent_conf.ha_vrrp_advert_int * THROTTLER_MULTIPLIER))
@@ -169,6 +239,7 @@ class HaRouter(router.RouterInfo):
             interface_name,
             self.ha_vr_id,
             ha_port_cidrs,
+            self.conntrackd_manager,
             nopreempt=True,
             advert_int=self.agent_conf.ha_vrrp_advert_int,
             priority=self.ha_priority,
@@ -198,6 +269,26 @@ class HaRouter(router.RouterInfo):
         try:
             shutil.rmtree(conf_dir)
         except EnvironmentError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+    def enable_conntrackd(self):
+        self.conntrackd_manager.spawn()
+
+    def disable_conntrackd(self):
+        # TODO(gaudenz): this is mostly a duplication of disable_keepalived.
+        # Maybe factor this into a common function.
+        if not self.conntrackd_manager:
+            LOG.debug('Error while disabling conntrackd for %s - no manager',
+                      self.router_id)
+            return
+        self.conntrackd_manager.disable()
+
+        conf_dir = self.conntrackd_manager.get_conf_dir()
+
+        try:
+            shutil.rmtree(conf_dir)
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
 
@@ -489,6 +580,7 @@ class HaRouter(router.RouterInfo):
         if self.process_monitor:
             self.destroy_state_change_monitor(self.process_monitor)
         self.disable_keepalived()
+        self.disable_conntrackd()
         self.ha_network_removed()
         super(HaRouter, self).delete()
 
@@ -511,6 +603,10 @@ class HaRouter(router.RouterInfo):
         LOG.debug("Processing HA router with HA port: %s", self.ha_port)
         if (self.ha_port and
                 self.ha_port['status'] == n_consts.PORT_STATUS_ACTIVE):
+            # Conntrackd needs to be enabled first, otherwise the keepalived
+            # script would try to start it (possibly with the wrong
+            # configuration).
+            self.enable_conntrackd()
             self.enable_keepalived()
 
     @runtime.synchronized('enable_radvd')
