@@ -182,6 +182,20 @@ def find_child_pids(pid, recursive=False):
     return child_pids
 
 
+def find_pid_by_cmd(cmd):
+    """Retrieve a list of the pids by their cmd."""
+    pids = execute(['pgrep', '-f', cmd], log_fail_as_error=False).split()
+
+    if len(pids) > 1:
+        raise RuntimeError(
+            _('%i processes for "%s" found.' % (len(pids), cmd))
+        )
+    if pids == []:
+        raise RuntimeError(_('No process for "%s" found.' % cmd))
+
+    return pids[0]
+
+
 def find_parent_pid(pid):
     """Retrieve the pid of the parent process of the given pid.
 
