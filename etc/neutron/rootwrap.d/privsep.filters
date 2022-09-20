@@ -29,3 +29,7 @@ privsep: PathFilter, privsep-helper, root,
 # NOTE: A second `--config-file` arg can also be added above. Since
 # many neutron components are installed like that (eg: by devstack).
 # Adjust to suit local requirements.
+
+# L3
+conntrackd: CommandFilter, conntrackd, root
+conntrackd_env: EnvFilter, env, root, PROCESS_TAG=, conntrackd
