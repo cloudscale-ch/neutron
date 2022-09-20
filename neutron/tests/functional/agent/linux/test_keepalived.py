@@ -45,7 +45,9 @@ class KeepalivedManagerTestCase(base.BaseLoggingTestCase,
         self.manager = keepalived.KeepalivedManager(
             'router1', self.expected_config, self.process_monitor,
             conf_path=cfg.CONF.state_path,
-            namespace=self.namespace)
+            namespace=self.namespace,
+            conntrackd_manager=None)
+
         self.addCleanup(self.manager.disable)
 
     def _prepare_devices(self):
