@@ -168,8 +168,8 @@ class KeepalivedInstance(object):
     """Instance section of a keepalived configuration."""
 
     def __init__(self, state, interface, vrouter_id, ha_cidrs,
-                 priority=HA_DEFAULT_PRIORITY, advert_int=None,
-                 mcast_src_ip=None, nopreempt=False,
+                 notify_script=None, priority=HA_DEFAULT_PRIORITY,
+                 advert_int=None, mcast_src_ip=None, nopreempt=False,
                  garp_master_delay=GARP_MASTER_DELAY,
                  vrrp_health_check_interval=0,
                  ha_conf_dir=None):
@@ -184,6 +184,7 @@ class KeepalivedInstance(object):
         self.priority = priority
         self.nopreempt = nopreempt
         self.advert_int = advert_int
+        self.notify_script = notify_script
         self.mcast_src_ip = mcast_src_ip
         self.garp_master_delay = garp_master_delay
         self.track_interfaces = []
@@ -298,6 +299,13 @@ class KeepalivedInstance(object):
                        '    virtual_router_id %s' % self.vrouter_id,
                        '    priority %s' % self.priority,
                        '    garp_master_delay %s' % self.garp_master_delay])
+
+        if self.notify_script:
+            config.extend([
+                       '    notify_master "%s primary"' % self.notify_script,
+                       '    notify_backup "%s backup"' % self.notify_script,
+                       '    notify_fault "%s fault"' % self.notify_script,
+            ])
 
         if self.nopreempt:
             config.append('    nopreempt')

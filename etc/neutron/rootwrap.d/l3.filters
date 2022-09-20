@@ -59,6 +59,12 @@ kill_keepalived_script: CommandFilter, keepalived-kill, root
 # l3 agent to delete floatingip's conntrack state
 conntrack: CommandFilter, conntrack, root
 
+# Conntrackd
+conntrackd: CommandFilter, conntrackd, root
+
+# rm, used to remove lock file
+rm: CommandFilter, rm, root
+
 # keepalived state change monitor
 keepalived_state_change: CommandFilter, neutron-keepalived-state-change, root
 # The following filters are used to kill the keepalived state change monitor.
