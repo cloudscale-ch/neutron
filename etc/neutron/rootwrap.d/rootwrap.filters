@@ -51,6 +51,8 @@ dibbler-client: CommandFilter, dibbler-client, root
 radvd: CommandFilter, radvd, root
 keepalived: CommandFilter, keepalived, root
 keepalived_state_change: CommandFilter, neutron-keepalived-state-change, root
+conntrackd: CommandFilter, conntrackd, root
+conntrackd_env: EnvFilter, env, root, PROCESS_TAG=, conntrackd
 
 # OPEN VSWITCH
 ovs-ofctl: CommandFilter, ovs-ofctl, root
