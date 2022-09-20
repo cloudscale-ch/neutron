@@ -456,7 +456,8 @@ class TestHAL3Agent(TestL3Agent):
     def _get_state_file_for_master_agent(self, router_id):
         for host in self.environment.hosts:
             keepalived_state_file = os.path.join(
-                host.neutron_config.state_path, "ha_confs", router_id, "state")
+                host.neutron_config.config.DEFAULT.state_path,
+                "ha_confs", router_id, "state")
 
             if self._get_keepalived_state(keepalived_state_file) == "master":
                 return keepalived_state_file
