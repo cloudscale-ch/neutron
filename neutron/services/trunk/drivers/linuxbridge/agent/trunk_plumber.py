@@ -110,7 +110,24 @@ class Plumber(object):
 
     def _get_vlan_children(self, dev):
         """Return set of (devname, vlan_id) tuples for children of device."""
-        devices = ip_lib.get_devices_info(namespace=self.namespace)
-        return {(device['name'], device['vlan_id']) for device in devices
-                if device.get('kind') == 'vlan' and
-                device.get('parent_name') == dev}
+
+        # Get the parent device(s)
+        parents = ip_lib.get_devices_info(namespace=self.namespace, ifname=dev)
+
+        if not parents:
+            return set()
+
+        # Linux doesn't seem to allow this. But if it did, this function
+        # would not be able to accurately return the right VLAN children.
+        if len(parents) > 1:
+            raise RuntimeError(f"More than one interface named {dev}")
+
+        children = ip_lib.get_devices_info(
+            namespace=self.namespace,
+            link=parents[0]['index'],
+        )
+
+        return {
+            (device['name'], device['vlan_id']) for device in children
+            if device.get('kind') == 'vlan'
+        }
