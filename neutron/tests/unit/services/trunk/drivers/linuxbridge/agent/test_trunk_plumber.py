@@ -33,19 +33,34 @@ IP_LINK_OUTPUT = [
     {'index': 8, 'name': 'br-tun'},
     {'index': 10, 'name': 'tapa962cfc7-9d'},
     {'index': 11, 'name': 'tap39df7d39-c5', 'kind': 'vlan',
-     'parent_name': 'tapa962cfc7-9d', 'vlan_id': 99},
+     'parent_name': 'tapa962cfc7-9d', 'parent_index': 10, 'vlan_id': 99},
     {'index': 12, 'name': 'tap39df7d44-b2', 'kind': 'vlan',
-     'parent_name': 'tapa962cfc7-9d', 'vlan_id': 904},
+     'parent_name': 'tapa962cfc7-9d', 'parent_index': 10, 'vlan_id': 904},
     {'index': 13, 'name': 'tap11113d44-3f', 'kind': 'vlan',
-     'parent_name': 'tapa962cfc7-9d', 'vlan_id': 777},
+     'parent_name': 'tapa962cfc7-9d', 'parent_index': 10, 'vlan_id': 777},
     {'index': 14, 'name': 'tap34786ac-28'},
     {'index': 15, 'name': 'tap47198374-5a', 'kind': 'vlan',
-     'parent_name': 'tap34786ac-28', 'vlan_id': 777},
+     'parent_name': 'tap34786ac-28', 'parent_index': 14, 'vlan_id': 777},
     {'index': 16, 'name': 'tap47198374-5b', 'kind': 'vlan',
-     'parent_name': 'tap34786ac-28', 'vlan_id': 2},
+     'parent_name': 'tap34786ac-28', 'parent_index': 14, 'vlan_id': 2},
     {'index': 17, 'name': 'tap47198374-5c', 'kind': 'vlan',
-     'parent_name': 'tap34786ac-28', 'vlan_id': 3}
+     'parent_name': 'tap34786ac-28', 'parent_index': 14, 'vlan_id': 3}
 ]
+
+
+def mock_get_devices_info(*args, **kwargs):
+    if 'ifname' in kwargs:
+        return [
+            dev for dev in IP_LINK_OUTPUT
+            if dev.get('name') == kwargs['ifname']
+        ]
+    elif 'link' in kwargs:
+        return [
+            dev for dev in IP_LINK_OUTPUT
+            if dev.get('parent_index') == kwargs['link']
+        ]
+    else:
+        return IP_LINK_OUTPUT
 
 
 class PlumberTestCase(base.BaseTestCase):
@@ -97,7 +112,7 @@ class PlumberTestCase(base.BaseTestCase):
                                 any_order=True)
 
     def test__get_vlan_children(self):
-        self.mock_get_devices.return_value = IP_LINK_OUTPUT
+        self.mock_get_devices.side_effect = mock_get_devices_info
         expected = [('tap47198374-5a', 777),
                     ('tap47198374-5b', 2),
                     ('tap47198374-5c', 3)]
