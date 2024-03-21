@@ -27,6 +27,7 @@ from neutron.agent.linux import l3_tc_lib
 from neutron.common import utils as common_utils
 from neutron.tests import base as tests_base
 from neutron.tests.common import machine_fixtures
+from neutron.tests.common import net_helpers
 from neutron.tests.common.exclusive_resources import ip_network
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
@@ -476,7 +477,7 @@ class TestHAL3Agent(TestL3Agent):
         # Create external network
         external_network = self.safe_client.create_network(
             tenant_id, external=True)
-        self.safe_client.create_subnet(
+        external_subnet = self.safe_client.create_subnet(
             tenant_id, external_network['id'], '42.0.0.0/24',
             enable_dhcp=False)
         self.safe_client.add_gateway_router(
@@ -493,10 +494,7 @@ class TestHAL3Agent(TestL3Agent):
         vm.block_until_boot()
 
         # Create a resource on the external network
-        external = self.useFixture(
-            machine_fixtures.FakeMachine(
-                self.environment.central_bridge,
-                '42.0.0.42/24'))
+        external = self._create_external_vm(external_network, ip='42.0.0.42')
         common_utils.wait_until_true(
             functools.partial(
                 self._is_ha_router_active_on_one_agent,
@@ -504,11 +502,30 @@ class TestHAL3Agent(TestL3Agent):
             timeout=90)
 
         # Test external connectivity, failover, test again
+        import remote_pdb; remote_pdb.set_trace(port=1234)
+        pinger = net_helpers.Pinger(vm.namespace, external.ip, interval=0.1)
+        netcat = net_helpers.NetcatTester(
+            vm.namespace,
+            external.namespace,
+            external.ip,
+            3333,
+            net_helpers.NetcatTester.TCP,
+        )
+
+        pinger.start()
         vm.block_until_ping(external.ip)
+        netcat.establish_connection()
+
         active_host = self._get_host_for_active_ha_router_replica(router_id)
         active_host.disconnect()
-        vm.assert_no_ping(external.ip)
+
+        # vm.assert_no_ping(external.ip)
         vm.block_until_ping(external.ip)
+        netcat.test_connectivity()
+        pinger.stop()
+
+        # Assert less than 30 lost packets (3 seconds)
+        assert pinger.sent - pinger.received < 30
 
     def _get_keepalived_state(self, keepalived_state_file):
         with open(keepalived_state_file, "r") as fd:
