@@ -26,6 +26,7 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import l3_tc_lib
 from neutron.common import utils as common_utils
 from neutron.tests import base as tests_base
+from neutron.tests.common import machine_fixtures
 from neutron.tests.common.exclusive_resources import ip_network
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
@@ -448,6 +449,66 @@ class TestHAL3Agent(TestL3Agent):
                 self._is_ha_router_active_on_one_agent,
                 router['id']),
             timeout=90)
+
+    def _get_host_for_active_ha_router_replica(self, router_id):
+        result = self.client.list_l3_agent_hosting_routers(router_id)
+        hostname = next(
+            agent['host'] for agent in result['agents'] if
+            agent['ha_state'] == 'active')
+        return self.environment.get_host_by_name(hostname)
+
+    def test_ha_router_failover(self):
+        tenant_id = uuidutils.generate_uuid()
+
+        # Create router
+        router = self.safe_client.create_router(tenant_id, ha=True)
+        router_id = router['id']
+        agents = self.client.list_l3_agent_hosting_routers(router_id)
+        self.assertEqual(2, len(agents['agents']),
+                         'HA router must be scheduled to both nodes')
+
+        # Create internal subnet
+        network = self.safe_client.create_network(tenant_id)
+        subnet = self.safe_client.create_subnet(
+            tenant_id, network['id'], '20.0.0.0/24')
+        self.safe_client.add_router_interface(router_id, subnet['id'])
+
+        # Create external network
+        external_network = self.safe_client.create_network(
+            tenant_id, external=True)
+        self.safe_client.create_subnet(
+            tenant_id, external_network['id'], '42.0.0.0/24',
+            enable_dhcp=False)
+        self.safe_client.add_gateway_router(
+            router_id,
+            external_network['id'])
+
+        # Create internal VM
+        vm = self.useFixture(
+            machine.FakeFullstackMachine(
+                self.environment.hosts[0],
+                network['id'],
+                tenant_id,
+                self.safe_client))
+        vm.block_until_boot()
+
+        # Create a resource on the external network
+        external = self.useFixture(
+            machine_fixtures.FakeMachine(
+                self.environment.central_bridge,
+                '42.0.0.42/24'))
+        common_utils.wait_until_true(
+            functools.partial(
+                self._is_ha_router_active_on_one_agent,
+                router_id),
+            timeout=90)
+
+        # Test external connectivity, failover, test again
+        vm.block_until_ping(external.ip)
+        active_host = self._get_host_for_active_ha_router_replica(router_id)
+        active_host.disconnect()
+        vm.assert_no_ping(external.ip)
+        vm.block_until_ping(external.ip)
 
     def _get_keepalived_state(self, keepalived_state_file):
         with open(keepalived_state_file, "r") as fd:

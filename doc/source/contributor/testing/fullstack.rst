@@ -32,7 +32,6 @@ Goals
     - Look in to non-deterministic failures when adding a large amount of
       tests (Possibly bug 1486199).
     - Switch to kill signal 15 to terminate agents (Bug 1487548).
-* Convert the L3 HA failover functional test to a full stack test
 * Write DVR tests
 * Write additional L3 HA tests
 * Write a test that validates DVR + L3 HA integration after

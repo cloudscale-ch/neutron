@@ -464,38 +464,6 @@ class L3HATestFailover(framework.L3AgentTestFramework):
         for subnet in external_port['subnets']:
             r_br.delete_flows(proto='ip', nw_dst=subnet['gateway_ip'])
 
-    def test_ha_router_failover(self):
-        router1, router2 = self.create_ha_routers()
-
-        master_router, slave_router = self._get_master_and_slave_routers(
-            router1, router2)
-
-        self._assert_ipv6_accept_ra(master_router, True)
-        self._assert_ipv6_forwarding(master_router, True, True)
-        self._assert_ipv6_accept_ra(slave_router, False)
-        self._assert_ipv6_forwarding(slave_router, False, False)
-
-        common_utils.wait_until_true(
-            lambda: master_router.ha_state == 'master')
-        common_utils.wait_until_true(
-            lambda: slave_router.ha_state == 'backup')
-
-        self.fail_ha_router(router1)
-
-        # NOTE: passing slave_router as first argument, because we expect
-        # that this router should be the master
-        new_master, new_slave = self._get_master_and_slave_routers(
-            slave_router, master_router)
-
-        self.assertEqual(master_router, new_slave)
-        self.assertEqual(slave_router, new_master)
-        self._assert_ipv6_accept_ra(new_master, True)
-        self._assert_ipv6_forwarding(new_master, True, True)
-        self._assert_ipv6_accept_ra(new_slave, False)
-        # after transition from master -> slave, 'all' IPv6 forwarding should
-        # be enabled
-        self._assert_ipv6_forwarding(new_slave, False, True)
-
     def test_ha_router_lost_gw_connection(self):
         self.agent.conf.set_override(
             'ha_vrrp_health_check_interval', 5)
