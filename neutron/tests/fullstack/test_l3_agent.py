@@ -27,6 +27,7 @@ from neutron.agent.linux import l3_tc_lib
 from neutron.common import utils as common_utils
 from neutron.tests import base as tests_base
 from neutron.tests.common.exclusive_resources import ip_network
+from neutron.tests.common import net_helpers
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
 from neutron.tests.fullstack.resources import machine
@@ -230,7 +231,8 @@ class TestL3Agent(base.BaseFullStackTestCase):
         external_vm.block_until_ping(fip['floating_ip_address'])
 
         if ha:
-            l3_agents = [host.agents['l3'] for host in self.environment.hosts]
+            l3_agents = [host.agents['l3'] for host in self.environment.hosts
+                         if 'l3' in host.agents]
             router_agent = self._get_l3_agents_with_ha_state(
                 l3_agents, router['id'])[0]
             qrouter_ns = self._get_namespace(
@@ -414,10 +416,18 @@ class TestLegacyL3Agent(TestL3Agent):
 class TestHAL3Agent(TestL3Agent):
 
     def setUp(self):
+        # Two hosts with L3 agent to host HA routers
         host_descriptions = [
             environment.HostDescription(l3_agent=True, dhcp_agent=True,
                                         l3_agent_extensions="fip_qos")
             for _ in range(2)]
+
+        # Add two hosts for FakeFullstackMachines
+        host_descriptions.extend([
+            environment.HostDescription()
+            for _ in range(2)
+        ])
+
         env = environment.Environment(
             environment.EnvironmentDescription(
                 network_type='vlan', l2_pop=True,
@@ -431,9 +441,6 @@ class TestHAL3Agent(TestL3Agent):
             agents['agents'][0]['ha_state'] != agents['agents'][1]['ha_state'])
 
     def test_ha_router(self):
-        # TODO(amuller): Test external connectivity before and after a
-        # failover, see: https://review.opendev.org/#/c/196393/
-
         tenant_id = uuidutils.generate_uuid()
         router = self.safe_client.create_router(tenant_id, ha=True)
 
@@ -448,6 +455,85 @@ class TestHAL3Agent(TestL3Agent):
                 self._is_ha_router_active_on_one_agent,
                 router['id']),
             timeout=90)
+
+    def _get_host_for_active_ha_router_replica(self, router_id):
+        result = self.client.list_l3_agent_hosting_routers(router_id)
+        hostname = next(
+            agent['host'] for agent in result['agents'] if
+            agent['ha_state'] == 'active')
+        return self.environment.get_host_by_name(hostname)
+
+    def test_ha_router_failover(self):
+        tenant_id = uuidutils.generate_uuid()
+
+        # Create router
+        router = self.safe_client.create_router(tenant_id, ha=True)
+        router_id = router['id']
+        agents = self.client.list_l3_agent_hosting_routers(router_id)
+        self.assertEqual(2, len(agents['agents']),
+                         'HA router must be scheduled to both nodes')
+
+        # Create internal subnet
+        network = self.safe_client.create_network(tenant_id)
+        subnet = self.safe_client.create_subnet(
+            tenant_id, network['id'], '20.0.0.0/24')
+        self.safe_client.add_router_interface(router_id, subnet['id'])
+
+        # Create external network
+        external_network = self.safe_client.create_network(
+            tenant_id, external=True)
+        self.safe_client.create_subnet(
+            tenant_id, external_network['id'], '42.0.0.0/24',
+            enable_dhcp=False)
+        self.safe_client.add_gateway_router(
+            router_id,
+            external_network['id'])
+
+        # Create internal VM
+        vm = self.useFixture(
+            machine.FakeFullstackMachine(
+                self.environment.hosts[2],
+                network['id'],
+                tenant_id,
+                self.safe_client))
+        vm.block_until_boot()
+
+        # Create external VM
+        external = self.useFixture(
+            machine.FakeFullstackMachine(
+                self.environment.hosts[3],
+                external_network['id'],
+                tenant_id,
+                self.safe_client))
+        external.block_until_boot()
+
+        common_utils.wait_until_true(
+            functools.partial(
+                self._is_ha_router_active_on_one_agent,
+                router_id),
+            timeout=90)
+
+        # Test external connectivity, failover, test again
+        pinger = net_helpers.Pinger(vm.namespace, external.ip, interval=0.1)
+        pinger.start()
+
+        # Ensure connectivity before disconnect
+        vm.block_until_ping(external.ip)
+
+        active_host = self._get_host_for_active_ha_router_replica(router_id)
+        active_host.disconnect()
+
+        # Ensure connectivity is shortly lost on failover and recovers
+        vm.assert_no_ping(external.ip)
+        vm.block_until_ping(external.ip)
+        pinger.stop()
+
+        # With the default advert_int of 2s the keepalived master timeout is
+        # about 6s. Assert less than 80 lost packets (8 seconds)
+        lost = pinger.sent - pinger.received
+        message = (f'Sent {pinger.sent} packets, received {pinger.received} '
+                   f'packets, lost {lost} packets')
+        assert lost < 80, message
 
     def _get_keepalived_state(self, keepalived_state_file):
         with open(keepalived_state_file, "r") as fd:
