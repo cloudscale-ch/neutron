@@ -28,3 +28,5 @@ haproxy
 keepalived
 
 iproute-tc [platform:rpm]
+conntrackd [platform:dpkg test conntrackd]
+conntrack-tools [platform:rpm test conntrackd]
