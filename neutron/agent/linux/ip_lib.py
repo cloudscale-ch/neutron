@@ -1531,7 +1531,7 @@ def ip_monitor(namespace, queue, event_stop, event_started):
         """
         _ip.bind(async_cache=True)
         try:
-            while True:
+            while not event_stop.is_set():
                 ip_addresses = _ip.get()
                 for ip_address in ip_addresses:
                     LOG.debug("IP monitor %s; Adding IP address: %s "

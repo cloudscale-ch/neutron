@@ -99,11 +99,12 @@ class MonitorDaemon(daemon.Daemon):
                 self.sync_conntrack('backup')
             self.notify_agent('backup')
 
-        # NOTE(gaudenz): Only starte these threads after the initial status is
+        # NOTE(gaudenz): Only start these threads after the initial status is
         # set because otherwise the initial status thread sometimes hangs.
         self._thread_ip_monitor.start()
         self._thread_read_queue.start()
         self._thread_read_queue.join()
+        self._thread_ip_monitor.join()
 
     def read_queue(self, _queue, event_stop, event_started):
         event_started.wait()
