@@ -144,8 +144,17 @@ class ProcessManager(MonitoredProcess):
                                      privsep_exec=True)
         except n_exc.ProcessExecutionError as exc:
             with excutils.save_and_reraise_exception() as ctxt:
-                if ('No such process' in str(exc) or
-                        'Cannot open network namespace' in str(exc)):
+                if 'Cannot open network namespace' in str(exc):
+                    LOG.debug('Namespace %s no longer present when "kill" '
+                              'signal was sent to pid %s. Trying without '
+                              'namespace.',
+                              self.namespace, pid)
+                    utils.execute(cmd, addl_env=self.cmd_addl_env,
+                                  run_as_root=self.run_as_root,
+                                  privsep_exec=True)
+                    ctxt.reraise = False
+
+                if 'No such process' in str(exc):
                     LOG.debug('Process %s not present when "kill" command '
                               'sent', pid)
                     ctxt.reraise = False
